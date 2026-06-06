@@ -1,0 +1,6 @@
+{
+  "name": "경마 게임",
+  "description": "등급별 능력치(속도)가 다른 말들을 확인하고, 우승마를 예측해 배팅할 수 있는 3D 스타일 2D 경마 시뮬레이션 게임입니다.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
