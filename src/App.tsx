@@ -13,7 +13,7 @@ import { RaceTrack } from './components/RaceTrack';
 import { RaceResults } from './components/RaceResults';
 import { HistoryLog } from './components/HistoryLog';
 import { Coins, HelpCircle, Trophy, Sparkles, RefreshCcw, DollarSign, Database, Check, AlertCircle, Loader2, Info, ExternalLink, Github } from 'lucide-react';
-import { isSupabaseConfigured, getGameDataFromSupabase, saveGameDataToSupabase, getUserId } from './supabase';
+import { isSupabaseConfigured, getGameDataFromSupabase, saveGameDataToSupabase, getUserId, getSupabaseConfig, updateSupabaseCredentials, setSupabaseSyncDisabled } from './supabase';
 
 export default function App() {
   // State Initialization with LocalStorage Persistence
@@ -62,6 +62,12 @@ export default function App() {
   const [supabaseError, setSupabaseError] = useState<string | null>(null);
   const [showSupabaseInstructions, setShowSupabaseInstructions] = useState<boolean>(false);
 
+  // States for interactive credentials form in modal - use raw variables so text is kept when disabled
+  const [inputUrl, setInputUrl] = useState<string>(() => getSupabaseConfig().rawUrl);
+  const [inputKey, setInputKey] = useState<string>(() => getSupabaseConfig().rawKey);
+  const [testSuccess, setTestSuccess] = useState<boolean>(false);
+  const [testLoading, setTestLoading] = useState<boolean>(false);
+
   // Initial load from Supabase if configured
   useEffect(() => {
     if (isSupabaseConfigured()) {
@@ -89,11 +95,83 @@ export default function App() {
         .then(() => {
           setSupabaseError(null);
         })
-        .catch((err) => {
-          setSupabaseError(err.message || 'Supabase 저장 실패');
+        .catch((err: any) => {
+          let errorMsg = err.message || 'Supabase 저장 실패';
+          if (errorMsg.includes('Invalid API key') || errorMsg.includes('JWT')) {
+            errorMsg = 'Supabase API Key (Anon Key)가 유효하지 않습니다. 설정을 확인해 주세요.';
+          }
+          setSupabaseError(errorMsg);
         });
     }
   }, [balance, history, supabaseLoading]);
+
+  // Handle live testing and saving of Supabase configuration
+  const handleTestAndSaveConfig = async () => {
+    setTestLoading(true);
+    setTestSuccess(false);
+    setSupabaseError(null);
+
+    try {
+      if (!inputUrl.trim() || !inputKey.trim()) {
+        throw new Error('Supabase URL과 Anon Key를 모두 입력해야 합니다.');
+      }
+      
+      const cleanUrl = inputUrl.trim();
+      const cleanKey = inputKey.trim();
+
+      if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+        throw new Error('Supabase URL은 http:// 또는 https://로 시작해야 합니다.');
+      }
+
+      // Re-enable sync before testing
+      setSupabaseSyncDisabled(false);
+
+      // 1. Dynamic credentials update (persist via localstorage & re-instantiate client)
+      updateSupabaseCredentials(cleanUrl, cleanKey);
+
+      // 2. Immediate load test to verify if the key is valid
+      const data = await getGameDataFromSupabase();
+      if (data) {
+        setBalance(data.balance);
+        setHistory(data.history);
+      }
+
+      setTestSuccess(true);
+      setSupabaseError(null);
+      setSupabaseLoading(false);
+    } catch (err: any) {
+      console.error('Supabase 연결 검증 실패:', err);
+      let errorMsg = err.message || 'Supabase 연결에 실패했습니다.';
+      if (errorMsg.includes('Invalid API key') || errorMsg.includes('JWT')) {
+        errorMsg = '유효하지 않은 API Key (Anon Key)입니다. 대시보드의 Project API keys에서 anon/public 키를 가져왔는지 확인해 주세요.';
+      } else if (errorMsg.includes('Failed to fetch')) {
+        errorMsg = '네트워크 연결 오류 또는 올바르지 않은 Supabase URL입니다.';
+      }
+      
+      setSupabaseError(errorMsg);
+      setTestSuccess(false);
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
+  const handleClearCustomConfig = () => {
+    updateSupabaseCredentials(null, null);
+    setSupabaseSyncDisabled(true); // also make sure sync is disabled
+    setInputUrl('');
+    setInputKey('');
+    setTestSuccess(false);
+    setSupabaseError(null);
+    setSupabaseLoading(false);
+  };
+
+  const handleDisableSyncTemporarily = () => {
+    setSupabaseSyncDisabled(true);
+    setSupabaseError(null);
+    setSupabaseLoading(false);
+    setTestSuccess(false);
+  };
+
 
   // Synchronizers to LocalStorage
   useEffect(() => {
@@ -312,6 +390,45 @@ export default function App() {
         
         {phase === 'lobby' && (
           <div className="space-y-8 animate-fade-in">
+            {supabaseError && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-100 rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow animate-fade-in">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-400 mt-0.5 shrink-0 animate-pulse" />
+                  <div className="space-y-1">
+                    <h4 className="font-bold text-red-400 text-sm flex items-center gap-2">
+                      <span>Supabase 데이터 베이스 연동 오류 및 실패</span>
+                      <span className="px-1.5 py-0.5 rounded bg-red-500/20 text-[10px] text-red-300 font-mono tracking-wider font-bold">Invalid API Key</span>
+                    </h4>
+                    <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                      입력 하신 Supabase API Key(Anon Key)가 올바르지 않거나 테이블 설정이 누락되어, 실시간 연동 및 자금 저장과 전적 업데이트 도중 오류가 발생 하였습니다:
+                    </p>
+                    <p className="font-mono text-xs text-red-300 bg-slate-950/80 px-2.5 py-1.5 rounded select-all break-all border border-red-500/10 inline-block mt-2">
+                      Error: {supabaseError}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-col sm:flex-row items-stretch md:items-center gap-2 shrink-0 w-full md:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTestSuccess(false);
+                      setShowSupabaseInstructions(true);
+                    }}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg transition-colors cursor-pointer text-center"
+                  >
+                    🛠️ 수동 설정 및 API Key 새로 입력
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDisableSyncTemporarily}
+                    className="px-4 py-2.5 bg-red-950/40 hover:bg-red-900/45 text-red-300 text-xs font-bold rounded-lg transition-colors border border-red-500/20 cursor-pointer text-center"
+                  >
+                    ❌ 임시 로컬 모드로 전환 (오류 해제)
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Quick Greeting / Play Callboard Banner */}
             <div className="relative rounded-lg overflow-hidden bg-[#1A1D24] border border-slate-800 p-6 md:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-xl">
               <div className="space-y-2">
@@ -498,15 +615,15 @@ export default function App() {
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                    클라우드 연동 가이드
+                    클라우드 연동 가이드 및 수동 설정
                   </h3>
-                  <p className="text-xs text-slate-400">GitHub 저장, Vercel 구동 및 Supabase 크레딧 저장 설정</p>
+                  <p className="text-xs text-slate-400">GitHub 저장, Vercel 구동 및 Supabase 실시간 크레딧 동기화</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowSupabaseInstructions(false)}
-                className="text-slate-400 hover:text-slate-200 transition-colors cursor-pointer text-sm font-bold bg-slate-800/40 hover:bg-slate-800/80 px-2 py-1 rounded"
+                className="text-slate-400 hover:text-slate-200 transition-colors cursor-pointer text-sm font-bold bg-slate-800/40 hover:bg-slate-800/80 px-2.5 py-1 rounded-lg"
               >
                 닫기
               </button>
@@ -514,15 +631,107 @@ export default function App() {
 
             <div className="space-y-6 text-sm text-slate-300">
               
-              {/* Part 1: GitHub & Vercel */}
+              {/* Part 1: Interactive Client Credentials Configuration */}
+              <div className="space-y-3 bg-slate-950/40 border border-slate-800/80 rounded-xl p-5">
+                <h4 className="font-bold text-amber-400 flex items-center gap-2 text-xs uppercase tracking-wider">
+                  <Database className="w-4 h-4 text-amber-400" />
+                  Supabase API 연결 수동 설정 및 복구
+                </h4>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  API Key 오류나 잘못 설정된 정보가 있을 때, 아래에 본인의 Supabase 상세 정보를 바로 입력하고 테스트하실 수 있습니다. 이 설정은 브라우저에 임시/영구 안전하게 저장됩니다.
+                </p>
+
+                <div className="space-y-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Supabase Project URL
+                    </label>
+                    <input
+                      type="text"
+                      value={inputUrl}
+                      onChange={(e) => setInputUrl(e.target.value)}
+                      placeholder="https://your-project-id.supabase.co"
+                      className="w-full bg-slate-900 border border-slate-800 px-3.5 py-2 rounded-lg text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder:text-slate-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Supabase Anon / Public API Key
+                    </label>
+                    <textarea
+                      value={inputKey}
+                      onChange={(e) => setInputKey(e.target.value)}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      rows={2}
+                      className="w-full bg-slate-900 border border-slate-800 px-3.5 py-2 rounded-lg text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder:text-slate-600 resize-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Local Feedback States and Error Banners */}
+                {supabaseError && (
+                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-lg flex items-start gap-2 text-xs">
+                    <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-bold">연결 검증 실패:</p>
+                      <p className="opacity-90">{supabaseError}</p>
+                    </div>
+                  </div>
+                )}
+
+                {testSuccess && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3 rounded-lg flex items-start gap-2 text-xs">
+                    <Check className="w-4 h-4 mt-0.5 shrink-0 animate-bounce" />
+                    <div>
+                      <p className="font-bold">연동 완료!</p>
+                      <p className="opacity-90">Supabase 연결에 성공했습니다. 자금과 전적이 실시간 연동됩니다.</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-1.5">
+                  <button
+                    type="button"
+                    disabled={testLoading}
+                    onClick={handleTestAndSaveConfig}
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-800/40 text-slate-200 hover:text-white font-bold text-xs rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {testLoading ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>연결 상태 확인 중...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>입력 정보 저장 및 실시간 테스트</span>
+                      </>
+                    )}
+                  </button>
+                  
+                  {(getSupabaseConfig().isCustom) && (
+                    <button
+                      type="button"
+                      onClick={handleClearCustomConfig}
+                      className="py-2.5 px-4 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 font-semibold text-xs rounded-lg transition-all"
+                      title="수동 설정 삭제 및 환경 변수 우선 연동 상태로 복귀"
+                    >
+                      설정 초기화
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Part 2: GitHub & Vercel */}
               <div className="space-y-2.5">
                 <h4 className="font-semibold text-amber-500 flex items-center gap-2">
                   <Github className="w-4 h-4 text-amber-400" />
-                  1. 깃허브 저장 & Vercel 무료 배포
+                  GitHub 저장 및 Vercel 무료 배포 방법
                 </h4>
                 <div className="bg-slate-950/60 border border-slate-800/80 rounded-lg p-4 space-y-2 text-xs text-slate-300 leading-relaxed">
                   <p>
-                    <strong className="text-white">🚀 GitHub 연동:</strong> AI Studio 우측 상단 톱니바퀴 설정 메뉴에서 <span className="px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 font-bold border border-slate-700">Export to GitHub</span>를 누르면 본인의 깃허브 레포지토리로 바로 저장됩니다. (또는 Download ZIP 파일 다운로드 가능)
+                    <strong className="text-white">🚀 GitHub 연동:</strong> AI Studio 우측 상단 톱니바퀴 설정 메뉴에서 <span className="px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 font-bold border border-slate-700">Export to GitHub</span>를 누르면 본인의 깃허브 레포지토리로 바로 저장됩니다.
                   </p>
                   <p>
                     <strong className="text-white">🌐 Vercel 구동:</strong> <a href="https://vercel.com" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline inline-flex items-center gap-0.5 font-bold">Vercel<ExternalLink className="w-3 h-3 inline" /></a>에 로그인한 뒤, 해당 Repository를 임포트(Import)하면 아무런 비용 없이 즉시 실시간 웹에 배포하여 무료 구동이 완료됩니다!
@@ -530,11 +739,11 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Part 2: Supabase database setup */}
+              {/* Part 3: SQL for DB Setup */}
               <div className="space-y-3">
                 <h4 className="font-semibold text-emerald-400 flex items-center gap-2">
                   <Database className="w-4 h-4 text-emerald-400" />
-                  2. Supabase 실시간 크레딧 연동 테이블 설정
+                  Supabase 테이블 및 SQL 설정 정보
                 </h4>
                 
                 <div className="space-y-2 text-xs">
@@ -559,37 +768,45 @@ USING (true) WITH CHECK (true);`}
                     </pre>
                   </div>
                 </div>
-
-                <div className="space-y-2 text-xs">
-                  <p className="text-slate-400">
-                    테이블을 생성한 후, 깃허브 저장소 또는 Vercel의 <strong className="text-white">Environment Variables(환경 변수)</strong>에 아래의 변수를 등록해 주시면 자동으로 본인의 Supabase 클라우드 데이터베이스에 연동됩니다.
-                  </p>
-                  
-                  <div className="bg-slate-950/80 border border-slate-850 p-3 rounded-lg space-y-1.5 font-mono text-[11px] text-slate-300">
-                    <div>
-                      <span className="text-amber-400 font-semibold">VITE_SUPABASE_URL</span> = <span className="text-slate-400">"본인의 Supabase Project URL"</span>
-                    </div>
-                    <div>
-                      <span className="text-amber-400 font-semibold">VITE_SUPABASE_ANON_KEY</span> = <span className="text-slate-400">"본인의 API Project Anon API Key"</span>
-                    </div>
-                  </div>
-                </div>
               </div>
 
-              {/* Status display */}
-              <div className="bg-[#1A1D24] border border-slate-800 rounded-lg p-3.5 flex items-center justify-between gap-4 text-xs">
-                <div className="space-y-0.5">
-                  <span className="text-slate-400 font-semibold">현재 연결 정보</span>
-                  <p className="text-slate-300 font-mono text-[10.5px]">접속 유저 ID: {getUserId()}</p>
+              {/* Connected Credentials Info */}
+              <div className="bg-[#1A1D24] border border-slate-800 rounded-lg p-3.5 flex items-center justify-between gap-4 text-xs font-mono">
+                <div className="space-y-0.5 text-left">
+                  <span className="text-slate-400 font-semibold font-sans">현재 연결 방식</span>
+                  <p className="text-[11px] text-slate-300">
+                    {getSupabaseConfig().isDisabled 
+                      ? '동기화 일시 중지됨 (로컬 우선)' 
+                      : getSupabaseConfig().isCustom 
+                        ? '수동 입력 테스트 키 연동 중' 
+                        : getSupabaseConfig().isEnvProvided 
+                          ? '서버 환경 변수 VITE_ 기입 연동 중' 
+                          : '로컬 브라우저 저장 모드 사용 중 (비연동)'}
+                  </p>
+                  <p className="text-slate-500 text-[10px]">계정 ID: {getUserId()}</p>
                 </div>
-                <div>
-                  {isSupabaseConfigured() ? (
-                    <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2 py-1 rounded font-bold">
-                      CONNECTED
+                <div className="flex items-center gap-2">
+                  {getSupabaseConfig().isDisabled && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSupabaseSyncDisabled(false);
+                        setSupabaseError(null);
+                        setSupabaseLoading(false);
+                        setTestSuccess(false);
+                      }}
+                      className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300 border border-emerald-500/15 rounded text-[10px] font-bold transition-all cursor-pointer"
+                    >
+                      동기화 복구
+                    </button>
+                  )}
+                  {isSupabaseConfigured() && !supabaseError ? (
+                    <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2 py-1 rounded font-bold text-[10px]">
+                      연동 활성화됨 (SYNCED)
                     </span>
                   ) : (
-                    <span className="bg-slate-800 text-slate-400 px-2 py-1 rounded font-bold">
-                      LOCAL ONLY
+                    <span className="bg-slate-800 text-slate-400 px-2 py-1 rounded font-bold text-[10px]">
+                      미연동 (LOCAL ONLY)
                     </span>
                   )}
                 </div>
