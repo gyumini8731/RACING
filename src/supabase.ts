@@ -1,18 +1,44 @@
 import { createClient } from '@supabase/supabase-js';
 
+// Clean credentials by removing quotes and trimming
+const cleanCredentials = (val: any): string => {
+  if (typeof val !== 'string') return '';
+  let str = val.trim();
+  if (str.startsWith('"') && str.endsWith('"')) {
+    str = str.slice(1, -1);
+  } else if (str.startsWith("'") && str.endsWith("'")) {
+    str = str.slice(1, -1);
+  }
+  return str.trim();
+};
+
 // Retrieve Supabase credentials from environment variables safely with cast
 const metaEnv = (import.meta as any).env || {};
-const initSupabaseUrl = metaEnv.VITE_SUPABASE_URL || '';
-const initSupabaseAnonKey = metaEnv.VITE_SUPABASE_ANON_KEY || '';
+const initSupabaseUrl = cleanCredentials(metaEnv.VITE_SUPABASE_URL || 'https://omgunttpijzarmmkqjyt.supabase.co');
+const initSupabaseAnonKey = cleanCredentials(metaEnv.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9tZ3VudHRwaWp6YXJtbWtxanl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2OTU2NzUsImV4cCI6MjA5NjI3MTY3NX0.6ooBF1T_fduaQPUmDPRVskQgzNhmytC-YcpncWc_45s');
 
 // Retrieve actual config, checking for UI-configured custom credentials first
 export const getSupabaseConfig = () => {
-  const isDisabled = localStorage.getItem('supabase_sync_disabled') === 'true';
+  let isDisabled = localStorage.getItem('supabase_sync_disabled') === 'true';
   const customUrl = localStorage.getItem('supabase_custom_url');
   const customKey = localStorage.getItem('supabase_custom_anon_key');
   
-  const resolvedUrl = (customUrl && customUrl.trim() !== '') ? customUrl.trim() : (initSupabaseUrl ? initSupabaseUrl.trim() : '');
-  const resolvedKey = (customKey && customKey.trim() !== '') ? customKey.trim() : (initSupabaseAnonKey ? initSupabaseAnonKey.trim() : '');
+  const resolvedUrl = cleanCredentials((customUrl && customUrl.trim() !== '') ? customUrl.trim() : (initSupabaseUrl ? initSupabaseUrl.trim() : ''));
+  const resolvedKey = cleanCredentials((customKey && customKey.trim() !== '') ? customKey.trim() : (initSupabaseAnonKey ? initSupabaseAnonKey.trim() : ''));
+  
+  // Auto override: If sync was disabled due to error, but we now have healthy credentials, auto-reenable it
+  if (resolvedUrl && resolvedKey) {
+    const isPlaceholder = [
+      'your-project', 'your-supabase', 'your_project', 'placeholder', 'your-url', 'insert-your', 'your-anon-key'
+    ].some(p => resolvedUrl.toLowerCase().includes(p) || resolvedKey.toLowerCase().includes(p));
+    
+    if (!isPlaceholder && resolvedKey.length >= 35) {
+      if (isDisabled) {
+        localStorage.removeItem('supabase_sync_disabled');
+        isDisabled = false;
+      }
+    }
+  }
   
   return {
     url: isDisabled ? '' : resolvedUrl,
