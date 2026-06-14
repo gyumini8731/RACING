@@ -16,9 +16,20 @@ import { Coins, HelpCircle, Trophy, Sparkles, RefreshCcw, DollarSign, Database, 
 import { isSupabaseConfigured, getGameDataFromSupabase, saveGameDataToSupabase, getUserId, getSupabaseConfig, updateSupabaseCredentials, setSupabaseSyncDisabled } from './supabase';
 
 export default function App() {
+  const [loggedInUsername, setLoggedInUsername] = useState<string | null>(() => {
+    return localStorage.getItem('derby_logged_in_username');
+  });
+
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
+  const [loginInputName, setLoginInputName] = useState<string>('');
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginLoading, setLoginLoading] = useState<boolean>(false);
+
   // State Initialization with LocalStorage Persistence
   const [horses, setHorses] = useState<Horse[]>(() => {
-    const saved = localStorage.getItem('race_game_horses');
+    const loggedIn = localStorage.getItem('derby_logged_in_username');
+    const key = loggedIn ? `race_game_horses_${loggedIn}` : 'race_game_horses';
+    const saved = localStorage.getItem(key);
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -30,7 +41,9 @@ export default function App() {
   });
 
   const [balance, setBalance] = useState<number>(() => {
-    const saved = localStorage.getItem('race_game_balance');
+    const loggedIn = localStorage.getItem('derby_logged_in_username');
+    const key = loggedIn ? `race_game_balance_${loggedIn}` : 'race_game_balance';
+    const saved = localStorage.getItem(key);
     if (saved) {
       const parsed = parseInt(saved, 10);
       return isNaN(parsed) ? 100000 : parsed;
@@ -39,7 +52,9 @@ export default function App() {
   });
 
   const [history, setHistory] = useState<RaceRecord[]>(() => {
-    const saved = localStorage.getItem('race_game_history');
+    const loggedIn = localStorage.getItem('derby_logged_in_username');
+    const key = loggedIn ? `race_game_history_${loggedIn}` : 'race_game_history';
+    const saved = localStorage.getItem(key);
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -86,7 +101,7 @@ export default function App() {
           setSupabaseLoading(false);
         });
     }
-  }, []);
+  }, [loggedInUsername]);
 
   // Synchronize state changes back to Supabase if configured
   useEffect(() => {
@@ -103,7 +118,7 @@ export default function App() {
           setSupabaseError(errorMsg);
         });
     }
-  }, [balance, history, supabaseLoading]);
+  }, [balance, history, supabaseLoading, loggedInUsername]);
 
   // Handle live testing and saving of Supabase configuration
   const handleTestAndSaveConfig = async () => {
@@ -175,16 +190,107 @@ export default function App() {
 
   // Synchronizers to LocalStorage
   useEffect(() => {
-    localStorage.setItem('race_game_horses', JSON.stringify(horses));
-  }, [horses]);
+    const key = loggedInUsername ? `race_game_horses_${loggedInUsername}` : 'race_game_horses';
+    localStorage.setItem(key, JSON.stringify(horses));
+  }, [horses, loggedInUsername]);
 
   useEffect(() => {
-    localStorage.setItem('race_game_balance', balance.toString());
-  }, [balance]);
+    const key = loggedInUsername ? `race_game_balance_${loggedInUsername}` : 'race_game_balance';
+    localStorage.setItem(key, balance.toString());
+  }, [balance, loggedInUsername]);
 
   useEffect(() => {
-    localStorage.setItem('race_game_history', JSON.stringify(history));
-  }, [history]);
+    const key = loggedInUsername ? `race_game_history_${loggedInUsername}` : 'race_game_history';
+    localStorage.setItem(key, JSON.stringify(history));
+  }, [history, loggedInUsername]);
+
+  const handleLogin = async (username: string) => {
+    const cleanUsername = username.trim();
+    if (!cleanUsername) return;
+    
+    setLoginLoading(true);
+    setLoginError(null);
+    
+    try {
+      localStorage.setItem('derby_logged_in_username', cleanUsername);
+      setLoggedInUsername(cleanUsername);
+      
+      const localBalanceKey = `race_game_balance_${cleanUsername}`;
+      const localHistoryKey = `race_game_history_${cleanUsername}`;
+      const localHorsesKey = `race_game_horses_${cleanUsername}`;
+      
+      const savedBalance = localStorage.getItem(localBalanceKey);
+      const savedHistory = localStorage.getItem(localHistoryKey);
+      const savedHorses = localStorage.getItem(localHorsesKey);
+      
+      let currentBalance = savedBalance ? parseInt(savedBalance, 10) : 100000;
+      if (isNaN(currentBalance)) currentBalance = 100000;
+      
+      let currentHistory = [];
+      if (savedHistory) {
+        try { currentHistory = JSON.parse(savedHistory); } catch (e) {}
+      }
+      
+      if (savedHorses) {
+        try { setHorses(JSON.parse(savedHorses)); } catch (e) {}
+      } else {
+        setHorses(INITIAL_HORSES);
+      }
+      
+      setBalance(currentBalance);
+      setHistory(currentHistory);
+      
+      if (isSupabaseConfigured()) {
+        setSupabaseLoading(true);
+        // Load data from Supabase for this logged-in account
+        const data = await getGameDataFromSupabase();
+        if (data) {
+          setBalance(data.balance);
+          setHistory(data.history);
+          localStorage.setItem(localBalanceKey, data.balance.toString());
+          localStorage.setItem(localHistoryKey, JSON.stringify(data.history));
+        } else {
+          // If no data exists in Supabase, sync current local balance and history to Supabase
+          await saveGameDataToSupabase(currentBalance, currentHistory);
+        }
+        setSupabaseError(null);
+      }
+      setShowLoginModal(false);
+      setLoginInputName('');
+    } catch (err: any) {
+      console.warn('Login Supabase Sync Warning:', err);
+      // Don't error out hard, we loaded local profile successfully
+    } finally {
+      setSupabaseLoading(false);
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('derby_logged_in_username');
+    setLoggedInUsername(null);
+    setSupabaseError(null);
+    
+    const savedBalance = localStorage.getItem('race_game_balance');
+    let currentBalance = savedBalance ? parseInt(savedBalance, 10) : 100000;
+    if (isNaN(currentBalance)) currentBalance = 100000;
+    
+    let currentHistory = [];
+    const savedHistory = localStorage.getItem('race_game_history');
+    if (savedHistory) {
+      try { currentHistory = JSON.parse(savedHistory); } catch (e) {}
+    }
+    
+    const savedHorses = localStorage.getItem('race_game_horses');
+    if (savedHorses) {
+      try { setHorses(JSON.parse(savedHorses)); } catch (e) {}
+    } else {
+      setHorses(INITIAL_HORSES);
+    }
+    
+    setBalance(currentBalance);
+    setHistory(currentHistory);
+  };
 
   // Handle clicking "PLAY" - Setup lineup and go to betting screen
   const handleInitiateGame = () => {
@@ -321,6 +427,33 @@ export default function App() {
 
           {/* Account Balance Widget */}
           <div className="flex items-center gap-2.5">
+            {/* User Session Widget */}
+            {loggedInUsername ? (
+              <div className="flex items-center gap-2 bg-slate-800/80 border border-slate-700/60 px-3 py-1.5 rounded-md text-xs">
+                <span className="text-slate-300 font-medium whitespace-nowrap">
+                  👤 <strong className="text-amber-400">{loggedInUsername}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="bg-[#242930] hover:bg-slate-750 text-[10px] text-slate-300 hover:text-white px-2 py-0.5 border border-slate-700 rounded transition-all font-bold cursor-pointer"
+                >
+                  로그아웃
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginInputName('');
+                  setLoginError(null);
+                  setShowLoginModal(true);
+                }}
+                className="bg-gradient-to-r from-amber-550 to-amber-600 hover:from-amber-450 hover:to-amber-500 text-slate-950 font-bold px-3 py-1.5 rounded-md text-xs transition-all shadow-md cursor-pointer flex items-center gap-1 shrink-0 whitespace-nowrap"
+              >
+                <span>👤 로그인</span>
+              </button>
+            )}
             {/* Supabase Sync Badge Widget */}
             <div className="flex items-center">
               {isSupabaseConfigured() ? (
@@ -504,6 +637,85 @@ export default function App() {
         )}
 
       </main>
+
+      {/* Login Modal */}
+      {showLoginModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-[#161920] border border-slate-800 rounded-2xl p-6 md:p-8 max-w-sm w-full shadow-2xl text-left space-y-5 animate-scale-up">
+            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+              <span className="text-2xl" role="img" aria-label="user">👤</span>
+              <div>
+                <h3 className="text-base font-bold text-slate-100 font-sans">계정 로그인</h3>
+                <p className="text-[10px] text-slate-400 font-sans">데이터가 실시간 클라우드로 안전하게 연동됩니다.</p>
+              </div>
+            </div>
+            
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (loginInputName.trim().length >= 2) {
+                handleLogin(loginInputName);
+              } else {
+                setLoginError('아이디는 최소 2자 이상 입력해 주세요.');
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 font-sans animate-fade-in">
+                  아이디 / 닉네임 입력
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={loginInputName}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/[^a-zA-Z0-9가-힣_-]/g, ''); // sanitize: alphanumeric + Korean, no space
+                    setLoginInputName(val);
+                    setLoginError(null);
+                  }}
+                  maxLength={15}
+                  placeholder="예: gildong12"
+                  className="w-full bg-slate-950 border border-slate-850 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all placeholder:text-slate-600"
+                />
+                <p className="text-[9px] text-slate-500 mt-1 font-sans">공백 없이 영문, 숫자, 한글만 입력이 가능합니다.</p>
+              </div>
+
+              {loginError && (
+                <div className="text-[11px] text-red-400 font-semibold bg-red-500/10 border border-red-500/15 p-2 rounded-lg flex items-center gap-1.5 font-sans">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              <div className="text-[10px] text-slate-400 leading-relaxed bg-[#1D212A] p-3 rounded-xl border border-slate-800/60 font-sans">
+                📌 <strong className="text-amber-400">자금 연동 안내:</strong> 최초 입력 시 새 계정이 생성 및 연동되며, 클라우드에 기존 계정이 있는 경우 자동으로 보관된 자금과 시뮬레이터 전적을 불러옵니다.
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowLoginModal(false)}
+                  className="flex-1 py-2.5 border border-slate-800 hover:bg-slate-950 text-slate-400 hover:text-slate-200 text-xs font-semibold rounded-xl transition-all cursor-pointer text-center"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={loginLoading}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-550 to-amber-600 hover:from-amber-450 hover:to-amber-500 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-lg active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  {loginLoading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin animate-infinite" />
+                      <span>로그인 중...</span>
+                    </>
+                  ) : (
+                    <span>로그인 완료</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Free Fund Recalibration Modal */}
       {showRefillConfirm && (

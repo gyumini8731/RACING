@@ -107,6 +107,11 @@ export const updateSupabaseCredentials = (url: string | null, key: string | null
 
 // Generate or retrieve a persistent unique user ID for this browser session/device
 export const getUserId = (): string => {
+  const loggedIn = localStorage.getItem('derby_logged_in_username');
+  if (loggedIn && loggedIn.trim() !== '') {
+    return loggedIn.trim();
+  }
+  
   let userId = localStorage.getItem('derby_user_uuid');
   if (!userId) {
     const randomArray = new Uint32Array(4);
