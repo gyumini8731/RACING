@@ -691,8 +691,19 @@ export default function App() {
                 </div>
               )}
 
-              <div className="text-[10px] text-slate-400 leading-relaxed bg-[#1D212A] p-3 rounded-xl border border-slate-800/60 font-sans">
-                📌 <strong className="text-amber-400">자금 연동 안내:</strong> 최초 입력 시 새 계정이 생성 및 연동되며, 클라우드에 기존 계정이 있는 경우 자동으로 보관된 자금과 시뮬레이터 전적을 불러옵니다.
+              <div className="text-[10px] text-slate-400 leading-relaxed bg-[#1D212A] p-3 rounded-xl border border-slate-800/60 font-sans space-y-2">
+                <div>
+                  📌 <strong className="text-amber-400">자금 연동 안내:</strong> 최초 입력 시 새 계정이 생성 및 연동되며, 클라우드에 기존 계정이 있는 경우 자동으로 보관된 자금과 시뮬레이터 전적을 불러옵니다.
+                </div>
+                {!isSupabaseConfigured() ? (
+                  <div className="p-2 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded text-[9.5px]">
+                    ⚠️ <strong className="text-amber-200">중요 (기기/브라우저 이동 시):</strong> 현재 브라우저에 Supabase 접속 정보가 설정되어 있지 않습니다. 다른 브라우저에서도 데이터를 바로 유지하여 로그인하려면, 본인의 프로젝트 환경 변수(<code className="bg-slate-900 px-1 text-slate-300 font-mono">VITE_SUPABASE_URL</code>, <code className="bg-slate-900 px-1 text-slate-300 font-mono">VITE_SUPABASE_ANON_KEY</code>)를 빌드/배포 서버 설정에 기입하거나 우측 상단 <span>☁️ 클라우드 설정</span>을 통해 수동으로 연결해 준 뒤 로그인해야 합니다.
+                  </div>
+                ) : (
+                  <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded text-[9.5px]">
+                    ✅ <strong className="text-emerald-200">Supabase 연결 상태:</strong> 접속 정보가 연동 중입니다. 로그인 시 클라우드에서 안전하게 데이터를 업로드/다운로드합니다.
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-2 pt-2">
