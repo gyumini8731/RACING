@@ -92,6 +92,9 @@ export default function App() {
           if (data) {
             setBalance(data.balance);
             setHistory(data.history);
+          } else {
+            // First time connecting or row is empty: immediately upload current local progress
+            saveGameDataToSupabase(balance, history).catch((e) => console.warn('Mount sync warning:', e));
           }
           setSupabaseLoading(false);
           setSupabaseError(null);
@@ -149,6 +152,9 @@ export default function App() {
       if (data) {
         setBalance(data.balance);
         setHistory(data.history);
+      } else {
+        // If there is no existing record on Supabase yet, post the current local state immediately!
+        await saveGameDataToSupabase(balance, history);
       }
 
       setTestSuccess(true);

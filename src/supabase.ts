@@ -152,25 +152,7 @@ export async function getGameDataFromSupabase(): Promise<SupabaseState | null> {
     }
 
     if (!data) {
-      // Create new record for this user
-      const defaultState: SupabaseState = { balance: 100000, history: [] };
-      const { error: insertError } = await client
-        .from('user_balances')
-        .insert({
-          user_id: uid,
-          balance: defaultState.balance,
-          history: defaultState.history,
-          updated_at: new Date().toISOString()
-        });
-
-      if (insertError) {
-        console.warn('Supabase insert default warning:', insertError.message);
-        if (insertError.message && (insertError.message.includes('API key') || insertError.message.includes('JWT') || insertError.message.includes('Invalid API key') || insertError.message.includes('apiKey'))) {
-          setSupabaseSyncDisabled(true);
-        }
-        throw insertError;
-      }
-      return defaultState;
+      return null;
     }
 
     return {
